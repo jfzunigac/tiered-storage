@@ -142,6 +142,15 @@ public class TestLeadershipWatcher extends TestBase {
         mockLeadershipWatcher.applyCurrentState();
         assertEquals(0, watchedTopicPartitions.size());
         assertEquals(currentLeadingPartitions, watchedTopicPartitions);
+
+        // test addition
+        for (int i = 0; i < 100; i++) {
+            currentLeadingPartitions.add(new TopicPartition(TEST_TOPIC_A, i));
+        }
+
+        mockLeadershipWatcher.applyCurrentState();
+        assertEquals(100, watchedTopicPartitions.size());
+        assertEquals(currentLeadingPartitions, watchedTopicPartitions);
     }
 
     /**
