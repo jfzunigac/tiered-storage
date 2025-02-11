@@ -57,7 +57,7 @@ public class DirectoryTreeWatcher implements Runnable {
     private static Map<TopicPartition, String> activeSegment;
     private static Map<TopicPartition, Set<String>> segmentsQueue;
     private static LeadershipWatcher leadershipWatcher;
-    private final Path topLevelPath;
+    protected final Path topLevelPath;
     private final WatchService watchService;
     private final ConcurrentLinkedQueue<UploadTask> uploadTasks = new ConcurrentLinkedQueue<>();
     private final S3FileUploader s3FileUploader;
@@ -853,7 +853,7 @@ public class DirectoryTreeWatcher implements Runnable {
      * @param dir
      * @return true if dir is put into watchKeyMap or if it already exists in watchKeyMap, false otherwise
      */
-    private boolean watchPath(Path dir) {
+    protected boolean watchPath(Path dir) {
         long now = System.currentTimeMillis();
         while (!Files.exists(dir) && System.currentTimeMillis() - now < 10000L) {   // TODO: make configurable
             // wait for a configurable amount of time for Kafka to create directory for new partitions
@@ -952,7 +952,7 @@ public class DirectoryTreeWatcher implements Runnable {
         updateTopicPartitionWatcherCountMetric();
     }
 
-    private void unwatchPath(Path dir) {
+    protected void unwatchPath(Path dir) {
         if (!watchKeyMap.containsKey(dir)) {
             LOG.debug(String.format("Cannot unwatch %s as there is no watcher on it.", dir));
             return;

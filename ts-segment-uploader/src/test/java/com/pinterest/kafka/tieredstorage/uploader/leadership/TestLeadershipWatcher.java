@@ -11,10 +11,13 @@ import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Set;
 
+import static java.nio.file.Files.createTempDirectory;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
@@ -91,6 +94,57 @@ public class TestLeadershipWatcher extends TestBase {
     }
 
     /**
+     * Test {@link LeadershipWatcher#applyCurrentState()} method
+     */
+    @Test
+    void testMultiplePartitionsUnwatched() throws Exception {
+        // test initial state
+        // environment provider setup
+        Path topLevelPath = createTempDirectory("testMultiplePartitionsUnwatched");
+        KafkaEnvironmentProvider environmentProvider = createTestEnvironmentProvider("sampleZkConnect", topLevelPath.toString());
+        environmentProvider.load();
+
+        // override s3 client
+        overrideS3ClientForFileDownloader(s3Client);
+        overrideS3AsyncClientForFileUploader(s3AsyncClient);
+
+        // endpoint provider setup
+        MockS3StorageServiceEndpointProvider endpointProvider = new MockS3StorageServiceEndpointProvider();
+        endpointProvider.initialize(TEST_CLUSTER);
+
+        // s3 uploader setup
+        SegmentUploaderConfiguration config = getSegmentUploaderConfiguration(TEST_CLUSTER);
+        S3FileUploader s3FileUploader = new MultiThreadedS3FileUploader(endpointProvider, config, environmentProvider);
+
+        // create watchers
+        DirectoryTreeWatcher directoryTreeWatcher = new MockDirectoryTreeWatcherWithActualDirectories(watchedTopicPartitions, s3FileUploader, config, environmentProvider);
+        mockLeadershipWatcher = new MockLeadershipWatcher(directoryTreeWatcher, config, environmentProvider);
+        mockLeadershipWatcher.applyCurrentState();
+        assertEquals(0, watchedTopicPartitions.size());
+
+        // test addition
+        for (int i = 0; i < 100; i++) {
+            boolean success = new File(topLevelPath.toFile(), new TopicPartition(TEST_TOPIC_A, i).toString()).mkdirs();
+            if (!success) {
+                throw new IOException("Failed to create directory for " + new TopicPartition(TEST_TOPIC_A, i));
+            }
+            currentLeadingPartitions.add(new TopicPartition(TEST_TOPIC_A, i));
+        }
+        mockLeadershipWatcher.applyCurrentState();
+        assertEquals(100, watchedTopicPartitions.size());
+        assertEquals(currentLeadingPartitions, watchedTopicPartitions);
+
+        // test removal
+        for (int i = 0; i < 100; i++) {
+            currentLeadingPartitions.remove(new TopicPartition(TEST_TOPIC_A, i));
+        }
+
+        mockLeadershipWatcher.applyCurrentState();
+        assertEquals(0, watchedTopicPartitions.size());
+        assertEquals(currentLeadingPartitions, watchedTopicPartitions);
+    }
+
+    /**
      * Mock {@link LeadershipWatcher} for testing
      */
     private static class MockLeadershipWatcher extends LeadershipWatcher {
@@ -130,6 +184,32 @@ public class TestLeadershipWatcher extends TestBase {
         @Override
         public void unwatch(TopicPartition topicPartition) {
             watchedTopicPartitions.remove(topicPartition);
+        }
+    }
+
+
+    /**
+     * Mock {@link DirectoryTreeWatcher} for testing.
+     */
+    protected static class MockDirectoryTreeWatcherWithActualDirectories extends DirectoryTreeWatcher {
+
+        private final Set<TopicPartition> watchedTopicPartitions;
+
+        public MockDirectoryTreeWatcherWithActualDirectories(Set<TopicPartition> watchedTopicPartitions, S3FileUploader s3FileUploader, SegmentUploaderConfiguration config, KafkaEnvironmentProvider environmentProvider) throws Exception {
+            super(s3FileUploader, config, environmentProvider);
+            this.watchedTopicPartitions = watchedTopicPartitions;
+        }
+
+        @Override
+        public void watch(TopicPartition topicPartition) {
+            watchedTopicPartitions.add(topicPartition);
+            watchPath(topLevelPath.resolve(topicPartition.toString()));
+        }
+
+        @Override
+        public void unwatch(TopicPartition topicPartition) {
+            watchedTopicPartitions.remove(topicPartition);
+            unwatchPath(topLevelPath.resolve(topicPartition.toString()));
         }
     }
 }
